@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import theme
 from ..db import EventStore
 
 
@@ -39,8 +40,13 @@ class StatsView(QWidget):
         self.hours_table.setEditTriggers(QTableWidget.NoEditTriggers)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(
+            theme.SPACE_LG, theme.SPACE_MD, theme.SPACE_LG, theme.SPACE_LG
+        )
+        root.setSpacing(theme.SPACE_SM)
         root.addWidget(self.apps_label)
         root.addWidget(self.apps_table, stretch=1)
+        root.addSpacing(theme.SPACE_MD)
         root.addWidget(self.hours_label)
         root.addWidget(self.hours_table, stretch=1)
 

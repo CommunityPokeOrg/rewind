@@ -75,9 +75,39 @@ rewind/
   workers.py        # QThread poller -> EventStore + Qt signals
   switches.py       # context-switch counter + fragmentation math (pure)
   db.py             # SQLite WAL schema + queries (pure)
+  theme.py          # design tokens (color/type/spacing) + central QSS
   views/            # RewindView, TimelineView, StatsView
   widgets/          # SeismographWidget (custom-painted EKG trace)
+tools/
+  capture_screenshots.py  # offscreen renders into docs/screenshots/
+docs/screenshots/   # rendered UI screenshots
 tests/              # pytest suite for the pure modules
+```
+
+## The interface
+
+A single dark, slate-charcoal window: a slim toolbar strip on top (Pause
+tracking), three tabs, and a status bar at the bottom.
+
+- **Rewind** — day navigation, the seismograph trace (hour grid, one EKG
+  spike per context switch, replay playhead), and a hairline-divided metric
+  strip: tracked hours, context switches, switches/hour, most-used app.
+- **Timeline** — the day's observations in a hairline-gridded table.
+- **Stats** — top apps by dwell time and switches per hour.
+
+The visual system lives in `rewind/theme.py`: one accent color (phosphor
+green, the trace itself), one radius scale, hairline borders and negative
+space instead of card chrome, and a system type stack. Views consume tokens;
+the stylesheet is generated once by `theme.stylesheet()`.
+
+![Rewind main window](docs/screenshots/main-window.png)
+![Daily rewind seismograph view](docs/screenshots/rewind-timeline.png)
+![Timeline tab](docs/screenshots/timeline-tab.png)
+
+Regenerate the docs images against a seeded day (works headless):
+
+```bash
+QT_QPA_PLATFORM=offscreen python tools/capture_screenshots.py
 ```
 
 ## Tests

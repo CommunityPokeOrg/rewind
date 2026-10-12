@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from .. import theme
 from ..db import EventStore
 
 
@@ -27,8 +28,12 @@ class TimelineView(QWidget):
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
         self.table.setSelectionBehavior(QTableWidget.SelectRows)
+        self.table.setAlternatingRowColors(True)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(
+            theme.SPACE_LG, theme.SPACE_MD, theme.SPACE_LG, theme.SPACE_LG
+        )
         root.addWidget(self.table)
 
         self.show_day(self.day)
@@ -41,7 +46,7 @@ class TimelineView(QWidget):
             cells = (
                 datetime.fromtimestamp(ts).strftime("%H:%M:%S"),
                 app or "",
-                title or "—",
+                title or "",
                 self._fmt_dur(dur),
             )
             for j, text in enumerate(cells):

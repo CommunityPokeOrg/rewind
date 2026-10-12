@@ -1,9 +1,10 @@
 """EKG / seismograph-style attention-fragmentation trace.
 
-Renders the day's context switches as a cardiac-monitor strip: a calm
-baseline that spikes sharply at each frontmost-app switch, with amplitude
-shaped by the bucketed switches-per-minute series. A playhead sweeps the
-trace during replay.
+The hero of the app: a cardiac-monitor strip for attention. A quiet
+baseline runs across the day; every context switch fires one sharp
+QRS-like spike whose height follows the local switches-per-minute rate.
+During replay a playhead sweeps the trace. Colors come exclusively from
+rewind.theme tokens.
 """
 
 from __future__ import annotations
@@ -15,16 +16,19 @@ from PySide6.QtCore import QPointF, Qt
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
+from .. import theme
+
 
 class SeismographWidget(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self.setMinimumHeight(180)
+        self.setMinimumHeight(200)
         self._series: list[tuple[float, float]] = []  # (bucket_ts, switches/min)
         self._spikes: list[float] = []                # exact switch timestamps
         self._start = 0.0
         self._end = 1.0
         self._playhead: Optional[float] = None
+        self._empty = True
 
     # ------------------------------------------------------------------ data
 
@@ -38,6 +42,7 @@ class SeismographWidget(QWidget):
         self._series = list(series)
         self._spikes = sorted(spikes)
         self._start, self._end = start, max(end, start + 1)
+        self._empty = not self._series and not self._spikes
         self.update()
 
     def set_playhead(self, ts: Optional[float]) -> None:
@@ -53,53 +58,78 @@ class SeismographWidget(QWidget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
-        base = h * 0.62
-        max_rate = max([r for _, r in self._series] + [1.0])
+        base = h * 0.60
 
-        # background
-        p.fillRect(self.rect(), QColor(30, 30, 32))
+        p.fillRect(self.rect(), QColor(theme.BG_RAISED))
 
-        # hourly grid
-        p.setPen(QPen(QColor(70, 70, 74), 1))
+        # hourly grid + hour labels in muted type
+        p.setPen(QPen(QColor(theme.BORDER), 1))
         hour = 3600.0
         t = math.ceil(self._start / hour) * hour
+        hours: list[tuple[float, int]] = []
         while t < self._end:
             x = self._x(t, w)
-            p.drawLine(QPointF(x, 8), QPointF(x, h - 8))
+            p.drawLine(QPointF(x, 10), QPointF(x, h - 24))
+            hours.append((x, int(t // hour) % 24))
             t += hour
-        p.setPen(QPen(QColor(90, 90, 96), 1, Qt.DashLine))
+        p.setPen(QColor(theme.TEXT_MUTED))
+        for x, hr in hours:
+            p.drawText(int(x) + 4, h - 8, f"{hr:02d}:00")
+
+        # baseline
+        p.setPen(QPen(QColor(theme.BORDER_STRONG), 1, Qt.DashLine))
         p.drawLine(QPointF(0, base), QPointF(w, base))
 
-        # EKG trace: baseline + QRS-like spikes at each switch, amplitude
-        # modulated by the bucketed fragmentation rate.
-        p.setPen(QPen(QColor(48, 209, 88), 2))  # macOS systemGreen
+        if self._empty:
+            p.setPen(QColor(theme.TEXT_MUTED))
+            p.drawText(
+                self.rect(),
+                Qt.AlignCenter,
+                "No activity recorded for this day.",
+            )
+            p.end()
+            return
+
+        max_rate = max([r for _, r in self._series] + [1.0])
+
+        # EKG trace: baseline + one QRS complex per switch, amplitude scaled
+        # by local fragmentation; a thin rate line threads the buckets.
+        trace_pen = QPen(QColor(theme.ACCENT), 1.8)
+        trace_pen.setCapStyle(Qt.RoundCap)
+        trace_pen.setJoinStyle(Qt.RoundJoin)
+        p.setPen(trace_pen)
+
         path = QPainterPath(QPointF(0, base))
         i = 0
-        spikes = self._spikes
         for ts, rate in self._series:
             x = self._x(ts, w)
-            while i < len(spikes) and spikes[i] < ts:
-                sx = self._x(spikes[i], w)
-                amp = 24 + 10 * rate / max_rate
-                path.lineTo(QPointF(sx - 4, base))
-                path.lineTo(QPointF(sx, base - amp))   # R peak
-                path.lineTo(QPointF(sx + 3, base + amp * 0.35))
-                path.lineTo(QPointF(sx + 6, base))
+            y = base - rate / max_rate * h * 0.30
+            while i < len(self._spikes) and self._spikes[i] < ts:
+                sx = self._x(self._spikes[i], w)
+                amp = 18 + 26 * rate / max_rate
+                path.lineTo(QPointF(sx - 5, base))
+                path.lineTo(QPointF(sx - 2, base + 4))    # small P wave
+                path.lineTo(QPointF(sx, base - amp))      # R peak
+                path.lineTo(QPointF(sx + 2, base + amp * 0.4))
+                path.lineTo(QPointF(sx + 5, base))
                 i += 1
-            path.lineTo(QPointF(x, base - rate / max_rate * h * 0.35))
-        while i < len(spikes):
-            sx = self._x(spikes[i], w)
-            path.lineTo(QPointF(sx - 4, base))
-            path.lineTo(QPointF(sx, base - 24))
-            path.lineTo(QPointF(sx + 3, base + 8))
-            path.lineTo(QPointF(sx + 6, base))
+            path.lineTo(QPointF(x, y))
+        while i < len(self._spikes):
+            sx = self._x(self._spikes[i], w)
+            path.lineTo(QPointF(sx - 5, base))
+            path.lineTo(QPointF(sx, base - 22))
+            path.lineTo(QPointF(sx + 2, base + 8))
+            path.lineTo(QPointF(sx + 5, base))
             i += 1
         path.lineTo(QPointF(w, base))
         p.drawPath(path)
 
-        # playhead
+        # playhead — the one piece of motion, justified by replay state
         if self._playhead is not None and self._start <= self._playhead <= self._end:
             x = self._x(self._playhead, w)
-            p.setPen(QPen(QColor(255, 69, 58), 2))  # macOS systemRed
-            p.drawLine(QPointF(x, 6), QPointF(x, h - 6))
+            p.setPen(QPen(QColor(theme.ALERT), 1.6))
+            p.drawLine(QPointF(x, 8), QPointF(x, h - 24))
+            p.setBrush(QColor(theme.ALERT))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QPointF(x, 8), 3.0, 3.0)
         p.end()

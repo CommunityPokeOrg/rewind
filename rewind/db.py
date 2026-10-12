@@ -11,7 +11,7 @@ import sqlite3
 import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
-from typing import Iterable, Optional
+from typing import Optional
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS events (
