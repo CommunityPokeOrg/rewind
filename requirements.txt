@@ -1,0 +1,9 @@
+# Rewind runtime dependencies
+PySide6>=6.6
+
+# macOS-only (frontmost app polling + window titles via Cocoa/Quartz)
+pyobjc-framework-Cocoa>=10.0; platform_system == "Darwin"
+pyobjc-framework-Quartz>=10.0; platform_system == "Darwin"
+
+# Tests
+pytest>=8
