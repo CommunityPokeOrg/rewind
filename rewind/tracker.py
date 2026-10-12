@@ -18,30 +18,45 @@ import subprocess
 import sys
 import time
 from typing import Optional
+from urllib.parse import urlparse
 
 IS_MACOS = sys.platform == "darwin"
 
-# bundle id -> AppleScript that returns "Tab Title" for the active tab.
+# bundle id -> AppleScript returning "<tab title>\t<tab url>" for the
+# active tab, or "" when the browser exposes no tab scripting.
 BROWSER_TAB_SCRIPTS = {
     "com.apple.Safari": (
-        'tell application "Safari" to get name of front document'
+        'tell application "Safari" to get '
+        "(name of front document) & tab & (URL of front document)"
     ),
     "com.google.Chrome": (
-        'tell application "Google Chrome" to get title of active tab of front window'
+        'tell application "Google Chrome" to get '
+        "(title of active tab of front window) & tab & "
+        "(URL of active tab of front window)"
     ),
     "com.brave.Browser": (
-        'tell application "Brave Browser" to get title of active tab of front window'
+        'tell application "Brave Browser" to get '
+        "(title of active tab of front window) & tab & "
+        "(URL of active tab of front window)"
     ),
     "com.microsoft.edgemac": (
-        'tell application "Microsoft Edge" to get title of active tab of front window'
-    ),
-    "org.mozilla.firefox": (
-        # Firefox exposes no tab AppleScript; window title already includes it.
-        ""
+        'tell application "Microsoft Edge" to get '
+        "(title of active tab of front window) & tab & "
+        "(URL of active tab of front window)"
     ),
     "company.thebrowser.Browser": (  # Arc
-        'tell application "Arc" to get title of active tab of front window'
+        'tell application "Arc" to get '
+        "(title of active tab of front window) & tab & "
+        "(URL of active tab of front window)"
     ),
+    # Zen is Gecko-based; its AppleScript support is limited. The query is
+    # attempted anyway and degrades quietly to the window title on failure.
+    "app.zen-browser.zen": (
+        'tell application "Zen" to get '
+        "(title of active tab of front window) & tab & "
+        "(URL of active tab of front window)"
+    ),
+    "org.mozilla.firefox": "",  # no tab AppleScript; window title suffices
 }
 
 
@@ -110,11 +125,22 @@ def _ax_window_title(pid: int) -> Optional[str]:
         return None
 
 
-def browser_tab_title(bundle_id: Optional[str]) -> Optional[str]:
-    """Active tab title for known browsers via AppleScript.
+def domain_of(url: Optional[str]) -> Optional[str]:
+    """Registered-ish hostname for a URL ('https://www.github.com/x' -> 'github.com')."""
+    if not url:
+        return None
+    host = urlparse(url if "://" in url else f"https://{url}").hostname
+    if not host:
+        return None
+    return host[4:] if host.startswith("www.") else host
+
+
+def browser_tab_info(bundle_id: Optional[str]) -> Optional[dict]:
+    """{'title', 'url'} for the active tab of a known browser via AppleScript.
 
     Triggers macOS's Automation permission prompt on first use per browser;
-    failure (denied/unsupported) returns None quietly.
+    failure (denied/unsupported) returns None quietly. Zen's scripting
+    bridge is limited, so it commonly lands here.
     """
     if not IS_MACOS or not bundle_id:
         return None
@@ -128,8 +154,11 @@ def browser_tab_title(bundle_id: Optional[str]) -> Optional[str]:
             text=True,
             timeout=3,
         )
-        title = out.stdout.strip()
-        return title or None
+        raw = out.stdout.strip()
+        if not raw:
+            return None
+        title, _, url = raw.partition("\t")
+        return {"title": title or None, "url": url or None}
     except Exception:
         return None
 
@@ -140,13 +169,17 @@ def sample() -> Optional[dict]:
     if not app:
         return None
     title = frontmost_window_title(app["pid"])
-    tab = browser_tab_title(app["bundle_id"])
+    domain = None
+    tab = browser_tab_info(app["bundle_id"])
     if tab:
-        title = tab  # browser tab titles are the meaningful window title
+        if tab["title"]:
+            title = tab["title"]  # tab title beats the window title
+        domain = domain_of(tab["url"])
     return {
         "ts": time.time(),
         "pid": app["pid"],
         "app_name": app["app_name"],
         "bundle_id": app["bundle_id"],
         "window_title": title,
+        "domain": domain,
     }

@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from typing import Optional
 
 from PySide6.QtCore import QThread, Signal
 
@@ -42,7 +41,8 @@ class TrackerWorker(QThread):
             s = tracker.sample()
             if s:
                 self.store.log_event(
-                    s["ts"], s["app_name"], s["bundle_id"], s["window_title"], s["pid"]
+                    s["ts"], s["app_name"], s["bundle_id"], s["window_title"],
+                    s["pid"], s.get("domain"),
                 )
                 self.sampled.emit(s)
                 ev = self.counter.observe(s["pid"], s["app_name"], s["ts"])

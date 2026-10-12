@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
@@ -43,14 +42,18 @@ class RewindWindow(QMainWindow):
         self.statusBar().addPermanentWidget(self.status)
         self.statusBar().showMessage("Tracking")
 
-        self.worker = TrackerWorker(store, poll_interval=2.0, parent=self)
-        self.worker.sampled.connect(self._on_sample)
-        self.worker.switched.connect(self._on_switch)
         self._switches_today = 0
+        self.worker = self._spawn_worker()
         self.worker.start()
         self._refresh_status()
 
     # ---------------------------------------------------------------- tracking
+
+    def _spawn_worker(self) -> TrackerWorker:
+        w = TrackerWorker(self.store, poll_interval=2.0, parent=self)
+        w.sampled.connect(self._on_sample)
+        w.switched.connect(self._on_switch)
+        return w
 
     def _toggle_tracking(self, paused: bool) -> None:
         if paused:
@@ -58,27 +61,24 @@ class RewindWindow(QMainWindow):
             self.track_btn.setText("Resume tracking")
             self.statusBar().showMessage("Paused")
         else:
-            self.worker = TrackerWorker(self.store, poll_interval=2.0, parent=self)
-            self.worker.sampled.connect(self._on_sample)
-            self.worker.switched.connect(self._on_switch)
+            self.worker = self._spawn_worker()
             self.worker.start()
             self.track_btn.setText("Pause tracking")
             self.statusBar().showMessage("Tracking")
         self._refresh_status()
 
     def _on_sample(self, s: dict) -> None:
+        title = s.get("window_title")
         self.statusBar().showMessage(
-            f"Tracking · {s['app_name']}"
-            + (f" — {s['window_title']}" if s.get("window_title") else "")
+            f"Tracking: {s['app_name']}" + (f" ({title})" if title else "")
         )
 
     def _on_switch(self, ev: dict) -> None:
         self._switches_today += 1
         self._refresh_status()
-        # refresh visible views cheaply
-        self.rewind_view.show_day(self.rewind_view.day)
-        self.timeline_view.show_day(self.timeline_view.day)
-        self.stats_view.show_day(self.stats_view.day)
+        self.rewind_view.refresh()
+        self.timeline_view.refresh()
+        self.stats_view.refresh()
 
     def _refresh_status(self) -> None:
         self.status.setText(f"{self._switches_today} switches today")

@@ -7,3 +7,6 @@ pyobjc-framework-Quartz>=10.0; platform_system == "Darwin"
 
 # Tests
 pytest>=8
+
+# Docs tooling (tools/capture_replay_gif.py)
+Pillow>=10
