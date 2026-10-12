@@ -112,6 +112,25 @@ QPushButton[accent="true"] {{
 QPushButton[accent="true"]:hover {{ background: {ACCENT_PRESS}; }}
 QPushButton[accent="true"]:pressed {{ background: {ACCENT_PRESS}; }}
 
+/* ------------------------- combo boxes: same hairline shape as buttons */
+QComboBox {{
+    background: {BG_RAISED};
+    border: 1px solid {BORDER};
+    border-radius: {RADIUS}px;
+    padding: 5px 12px;
+    min-height: 18px;
+}}
+QComboBox:hover {{ border-color: {BORDER_STRONG}; }}
+QComboBox:focus {{ border-color: {ACCENT}; }}
+QComboBox::drop-down {{ border: none; width: 20px; }}
+QComboBox QAbstractItemView {{
+    background: {BG_RAISED};
+    border: 1px solid {BORDER_STRONG};
+    selection-background-color: {BG_HOVER};
+    selection-color: {TEXT};
+    outline: none;
+}}
+
 /* ------------------------- toolbar: slim instrument strip */
 QToolBar {{
     background: {BG_BASE};

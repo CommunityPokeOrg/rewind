@@ -22,8 +22,10 @@ class TimelineView(QWidget):
         self.store = store
         self.day = date.today()
 
-        self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Time", "Application", "Window", "Duration"])
+        self.table = QTableWidget(0, 5)
+        self.table.setHorizontalHeaderLabels(
+            ["Time", "Application", "Window", "Site", "Duration"]
+        )
         self.table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
         self.table.verticalHeader().setVisible(False)
         self.table.setEditTriggers(QTableWidget.NoEditTriggers)
@@ -38,15 +40,19 @@ class TimelineView(QWidget):
 
         self.show_day(self.day)
 
+    def refresh(self) -> None:
+        self.show_day(self.day)
+
     def show_day(self, day: date) -> None:
         self.day = day
         rows = self.store.events_for_day(day)
         self.table.setRowCount(len(rows))
-        for i, (ts, app, _bid, title, _pid, dur) in enumerate(rows):
+        for i, (ts, app, _bid, title, _pid, dur, domain) in enumerate(rows):
             cells = (
                 datetime.fromtimestamp(ts).strftime("%H:%M:%S"),
                 app or "",
                 title or "",
+                domain or "",
                 self._fmt_dur(dur),
             )
             for j, text in enumerate(cells):

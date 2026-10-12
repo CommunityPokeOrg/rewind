@@ -76,9 +76,9 @@ class RewindWindow(QMainWindow):
     def _on_switch(self, ev: dict) -> None:
         self._switches_today += 1
         self._refresh_status()
-        self.rewind_view.show_day(self.rewind_view.day)
-        self.timeline_view.show_day(self.timeline_view.day)
-        self.stats_view.show_day(self.stats_view.day)
+        self.rewind_view.refresh()
+        self.timeline_view.refresh()
+        self.stats_view.refresh()
 
     def _refresh_status(self) -> None:
         self.status.setText(f"{self._switches_today} switches today")

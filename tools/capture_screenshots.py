@@ -1,7 +1,8 @@
 """Render Rewind offscreen and save PNGs to docs/screenshots/.
 
 Seeds a temp database with a plausible day (deep-focus morning, fragmented
-afternoon), then grabs the real widgets — no fake markup. Run:
+afternoon, browser events carrying domains), then grabs the real widgets —
+no fake markup. Run:
 
     QT_QPA_PLATFORM=offscreen python tools/capture_screenshots.py
 """
@@ -12,7 +13,7 @@ import os
 import random
 import sys
 import tempfile
-from datetime import date, datetime, timedelta
+from datetime import date, datetime
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -21,15 +22,18 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 OUT = ROOT / "docs" / "screenshots"
 
+# (app, bundle id, window title, domain-or-None)
 APPS = [
-    ("Xcode", "com.apple.dt.Xcode", "rewind - tracker.py"),
-    ("Safari", "com.apple.Safari", "Qt for Python - QThread"),
-    ("Terminal", "com.apple.Terminal", "pytest -q"),
-    ("Slack", "com.tinyspeck.slackmacgap", "#design"),
-    ("Mail", "com.apple.mail", "Inbox"),
-    ("Notes", "com.apple.Notes", "Ideas"),
-    ("Figma", "com.figma.Desktop", "Rewind UI mocks"),
-    ("Music", "com.apple.Music", "Focus"),
+    ("Xcode", "com.apple.dt.Xcode", "rewind - tracker.py", None),
+    ("Safari", "com.apple.Safari", "Pull requests - CommunityPokeOrg/rewind", "github.com"),
+    ("Terminal", "com.apple.Terminal", "pytest -q", None),
+    ("Slack", "com.tinyspeck.slackmacgap", "#design", None),
+    ("Safari", "com.apple.Safari", "QThread - Qt for Python", "doc.qt.io"),
+    ("Safari", "com.apple.Safari", "YouTube", "youtube.com"),
+    ("Mail", "com.apple.mail", "Inbox", None),
+    ("Safari", "com.apple.Safari", "Hacker News", "news.ycombinator.com"),
+    ("Figma", "com.figma.Desktop", "Rewind UI mocks", None),
+    ("Music", "com.apple.Music", "Focus", None),
 ]
 
 
@@ -46,9 +50,9 @@ def seed_day(store, day: date) -> None:
         # calm deep-focus morning; fragmented afternoon bursts
         dense = datetime.fromtimestamp(t).hour >= 14
         dwell = rng.randint(30, 140) if dense else rng.randint(240, 900)
-        name, bundle, title = APPS[app_i % len(APPS)]
+        name, bundle, title, domain = APPS[app_i % len(APPS)]
         pid = pid_map.setdefault(app_i, 500 + app_i)
-        store.log_event(t, name, bundle, title, pid)
+        store.log_event(t, name, bundle, title, pid, domain=domain)
         if last_pid is not None and pid != last_pid:
             store.log_switch(t, last_pid, pid, last_name, name)
         last_pid, last_name = pid, name
@@ -78,6 +82,10 @@ def main() -> None:
 
         win.grab().save(str(OUT / "main-window.png"))
         win.rewind_view.grab().save(str(OUT / "rewind-timeline.png"))
+
+        win.tabs.setCurrentWidget(win.stats_view)
+        app.processEvents()
+        win.stats_view.grab().save(str(OUT / "stats-tab.png"))
 
         win.tabs.setCurrentWidget(win.timeline_view)
         app.processEvents()

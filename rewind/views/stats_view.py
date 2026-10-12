@@ -1,10 +1,16 @@
-"""Per-day stats: top apps by dwell and switches per hour."""
+"""Stats view — breakdowns for the selected timeframe.
+
+Top apps and sites each carry a "Where you go next" column: the top 3
+destinations reached immediately after leaving that item, computed from
+consecutive event pairs in the same window (rewind/transitions.py).
+"""
 
 from __future__ import annotations
 
-from datetime import date, datetime
+from datetime import datetime
 
 from PySide6.QtWidgets import (
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QTableWidget,
@@ -13,55 +19,114 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from .. import theme
+from .. import theme, transitions
 from ..db import EventStore
+from .timeframe import TimeframeSelector
+
+
+def _table(headers: list[str], stretch_col: int = 0) -> QTableWidget:
+    t = QTableWidget(0, len(headers))
+    t.setHorizontalHeaderLabels(headers)
+    t.horizontalHeader().setSectionResizeMode(stretch_col, QHeaderView.Stretch)
+    t.verticalHeader().setVisible(False)
+    t.setEditTriggers(QTableWidget.NoEditTriggers)
+    t.setAlternatingRowColors(True)
+    return t
+
+
+def _section(label: str, table: QTableWidget) -> QWidget:
+    box = QWidget()
+    lay = QVBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(theme.SPACE_SM)
+    l = QLabel(label)
+    l.setObjectName("sectionLabel")
+    lay.addWidget(l)
+    lay.addWidget(table)
+    return box
 
 
 class StatsView(QWidget):
     def __init__(self, store: EventStore, parent=None) -> None:
         super().__init__(parent)
         self.store = store
-        self.day = date.today()
+        self.start, self.end = 0.0, 1.0
 
-        self.apps_label = QLabel("Top applications")
-        self.apps_label.setObjectName("sectionLabel")
-        self.apps_table = QTableWidget(0, 3)
-        self.apps_table.setHorizontalHeaderLabels(["Application", "Time", "Samples"])
-        self.apps_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.apps_table.verticalHeader().setVisible(False)
-        self.apps_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.timeframe = TimeframeSelector()
+        head = QHBoxLayout()
+        head.addWidget(self.timeframe)
+        head.addStretch(1)
 
-        self.hours_label = QLabel("Context switches per hour")
-        self.hours_label.setObjectName("sectionLabel")
-        self.hours_table = QTableWidget(0, 2)
-        self.hours_table.setHorizontalHeaderLabels(["Hour", "Switches"])
-        self.hours_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
-        self.hours_table.verticalHeader().setVisible(False)
-        self.hours_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.apps_table = _table(
+            ["Application", "Time", "Samples", "Where you go next"], stretch_col=3
+        )
+        self.sites_table = _table(
+            ["Site", "Time", "Samples", "Where you go next"], stretch_col=3
+        )
+        self.pages_table = _table(
+            ["Application", "Page or document", "Time"], stretch_col=1
+        )
+        self.hours_table = _table(["Hour", "Switches"])
+
+        left = QVBoxLayout()
+        left.addWidget(_section("Top applications", self.apps_table), stretch=1)
+        left.addWidget(_section("Sites", self.sites_table), stretch=1)
+        right = QVBoxLayout()
+        right.addWidget(_section("Pages and documents", self.pages_table), stretch=1)
+        right.addWidget(_section("Context switches per hour", self.hours_table), stretch=1)
+        cols = QHBoxLayout()
+        cols.setSpacing(theme.SPACE_XL)
+        cols.addLayout(left, stretch=1)
+        cols.addLayout(right, stretch=1)
 
         root = QVBoxLayout(self)
         root.setContentsMargins(
             theme.SPACE_LG, theme.SPACE_MD, theme.SPACE_LG, theme.SPACE_LG
         )
-        root.setSpacing(theme.SPACE_SM)
-        root.addWidget(self.apps_label)
-        root.addWidget(self.apps_table, stretch=1)
-        root.addSpacing(theme.SPACE_MD)
-        root.addWidget(self.hours_label)
-        root.addWidget(self.hours_table, stretch=1)
+        root.setSpacing(theme.SPACE_MD)
+        root.addLayout(head)
+        root.addLayout(cols, stretch=1)
 
-        self.show_day(self.day)
+        self.timeframe.rangeChanged.connect(self._set_range)
+        self.refresh()
 
-    def show_day(self, day: date) -> None:
-        self.day = day
+    def _set_range(self, start: float, end: float) -> None:
+        self.refresh()
 
-        apps = self.store.top_apps(day, limit=15)
+    def refresh(self) -> None:
+        self.start, self.end = self.timeframe.range()
+        start, end = self.start, self.end
+        events_dicts = transitions.to_event_dicts(
+            self.store.events_in_range(start, end)
+        )
+
+        # Top applications + where the user goes after leaving each app
+        apps = self.store.top_apps_in_range(start, end, limit=12)
         self.apps_table.setRowCount(len(apps))
         for i, (name, dur, n) in enumerate(apps):
-            for j, text in enumerate((name, _fmt_dur(dur), str(n))):
+            nxt, _total = transitions.top_next_for_app(events_dicts, name)
+            cells = (name, _fmt_dur(dur), str(n), transitions.format_next(nxt))
+            for j, text in enumerate(cells):
                 self.apps_table.setItem(i, j, QTableWidgetItem(text))
 
-        switches = self.store.switches_for_day(day)
+        # Sites + where the user goes after leaving each site
+        sites = self.store.top_domains_in_range(start, end, limit=12)
+        self.sites_table.setRowCount(len(sites))
+        for i, (domain, dur, n) in enumerate(sites):
+            nxt, _total = transitions.top_next(events_dicts, domain)
+            cells = (domain, _fmt_dur(dur), str(n), transitions.format_next(nxt))
+            for j, text in enumerate(cells):
+                self.sites_table.setItem(i, j, QTableWidgetItem(text))
+
+        # Exact pages / documents
+        pages = self.store.top_titles_in_range(start, end, limit=15)
+        self.pages_table.setRowCount(len(pages))
+        for i, (app, title, dur, _n) in enumerate(pages):
+            for j, text in enumerate((app, title, _fmt_dur(dur))):
+                self.pages_table.setItem(i, j, QTableWidgetItem(text))
+
+        # Switches per hour
+        switches = self.store.switches_in_range(start, end)
         per_hour: dict[int, int] = {}
         for (ts, *_rest) in switches:
             h = datetime.fromtimestamp(ts).hour

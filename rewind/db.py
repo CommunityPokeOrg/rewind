@@ -3,17 +3,25 @@
 The database lives on disk in WAL mode so the background poller thread and
 the UI thread can share one connection without blocking each other. All data
 is local metadata only — no screenshots, no content capture.
+
+Schema versioning uses ``PRAGMA user_version``:
+
+* v1: ``events`` (ts, app_name, bundle_id, window_title, pid, duration_s)
+      and ``switches`` (ts, from/to pid, from/to app).
+* v2: adds ``events.domain`` — the browser tab's derived domain, so dwell
+      time can be aggregated per site.
 """
 
 from __future__ import annotations
 
 import sqlite3
-import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Optional
 
-SCHEMA = """
+SCHEMA_VERSION = 2
+
+SCHEMA_V1 = """
 CREATE TABLE IF NOT EXISTS events (
     id           INTEGER PRIMARY KEY AUTOINCREMENT,
     ts           REAL    NOT NULL,          -- observation start, unix seconds
@@ -55,6 +63,14 @@ def day_bounds(day: date) -> tuple[float, float]:
     return start, end
 
 
+def last_hours(n: int, now: Optional[float] = None) -> tuple[float, float]:
+    """Epoch bounds [start, end) covering the trailing ``n`` hours."""
+    import time
+
+    end = time.time() if now is None else now
+    return end - n * 3600.0, end
+
+
 class EventStore:
     """Thread-sharable SQLite store (WAL) for events and context switches."""
 
@@ -66,8 +82,19 @@ class EventStore:
         self.conn = sqlite3.connect(self.path, check_same_thread=False)
         self.conn.execute("PRAGMA journal_mode=WAL")
         self.conn.execute("PRAGMA synchronous=NORMAL")
-        self.conn.executescript(SCHEMA)
+        self._migrate()
         self.conn.commit()
+
+    def _migrate(self) -> None:
+        """Bring the schema up to SCHEMA_VERSION, preserving existing data."""
+        (version,) = self.conn.execute("PRAGMA user_version").fetchone()
+        if version < 1:
+            self.conn.executescript(SCHEMA_V1)
+            version = 1
+        if version < 2:
+            self.conn.execute("ALTER TABLE events ADD COLUMN domain TEXT")
+            version = 2
+        self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
 
     # ------------------------------------------------------------------ writes
 
@@ -78,6 +105,7 @@ class EventStore:
         bundle_id: Optional[str],
         window_title: Optional[str],
         pid: Optional[int],
+        domain: Optional[str] = None,
     ) -> int:
         """Insert an observation; backfill the previous event's dwell time."""
         cur = self.conn.cursor()
@@ -90,9 +118,9 @@ class EventStore:
                 (max(0.0, ts - row[1]), row[0]),
             )
         cur.execute(
-            "INSERT INTO events (ts, app_name, bundle_id, window_title, pid)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (ts, app_name, bundle_id, window_title, pid),
+            "INSERT INTO events (ts, app_name, bundle_id, window_title, pid, domain)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (ts, app_name, bundle_id, window_title, pid, domain),
         )
         self.conn.commit()
         return cur.lastrowid
@@ -115,26 +143,34 @@ class EventStore:
         return cur.lastrowid
 
     # ------------------------------------------------------------------ reads
+    # All range queries take [start, end) epoch seconds.
 
-    def events_for_day(self, day: date) -> list[sqlite3.Row | tuple]:
-        start, end = day_bounds(day)
+    def events_in_range(self, start: float, end: float) -> list[tuple]:
         return self.conn.execute(
-            "SELECT ts, app_name, bundle_id, window_title, pid, duration_s"
+            "SELECT ts, app_name, bundle_id, window_title, pid, duration_s, domain"
             " FROM events WHERE ts >= ? AND ts < ? ORDER BY ts",
             (start, end),
         ).fetchall()
 
-    def switches_for_day(self, day: date) -> list[tuple]:
-        start, end = day_bounds(day)
+    def switches_in_range(self, start: float, end: float) -> list[tuple]:
         return self.conn.execute(
             "SELECT ts, from_pid, to_pid, from_app, to_app"
             " FROM switches WHERE ts >= ? AND ts < ? ORDER BY ts",
             (start, end),
         ).fetchall()
 
-    def top_apps(self, day: date, limit: int = 10) -> list[tuple]:
-        """(app_name, total_duration_s, samples) for a day, by total dwell."""
-        start, end = day_bounds(day)
+    def tracked_seconds_in_range(self, start: float, end: float) -> float:
+        (total,) = self.conn.execute(
+            "SELECT COALESCE(SUM(duration_s), 0) FROM events"
+            " WHERE ts >= ? AND ts < ?",
+            (start, end),
+        ).fetchone()
+        return float(total)
+
+    def top_apps_in_range(
+        self, start: float, end: float, limit: int = 10
+    ) -> list[tuple]:
+        """(app_name, total_duration_s, samples) by total dwell."""
         return self.conn.execute(
             "SELECT app_name, SUM(duration_s), COUNT(*) FROM events"
             " WHERE ts >= ? AND ts < ? GROUP BY app_name"
@@ -142,14 +178,47 @@ class EventStore:
             (start, end, limit),
         ).fetchall()
 
+    def top_titles_in_range(
+        self, start: float, end: float, limit: int = 15
+    ) -> list[tuple]:
+        """(app_name, window_title, total_duration_s, samples).
+
+        Aggregates dwell per exact window/document title so the Stats view
+        can show which pages and documents actually consumed the time.
+        """
+        return self.conn.execute(
+            "SELECT app_name, COALESCE(NULLIF(window_title, ''), '(no title)'),"
+            " SUM(duration_s), COUNT(*) FROM events"
+            " WHERE ts >= ? AND ts < ?"
+            " GROUP BY app_name, window_title"
+            " ORDER BY SUM(duration_s) DESC LIMIT ?",
+            (start, end, limit),
+        ).fetchall()
+
+    def top_domains_in_range(
+        self, start: float, end: float, limit: int = 15
+    ) -> list[tuple]:
+        """(domain, total_duration_s, samples) — browser events only."""
+        return self.conn.execute(
+            "SELECT domain, SUM(duration_s), COUNT(*) FROM events"
+            " WHERE ts >= ? AND ts < ? AND domain IS NOT NULL AND domain != ''"
+            " GROUP BY domain ORDER BY SUM(duration_s) DESC LIMIT ?",
+            (start, end, limit),
+        ).fetchall()
+
+    # ----------------------------------------------------- day conveniences
+
+    def events_for_day(self, day: date) -> list[tuple]:
+        return self.events_in_range(*day_bounds(day))
+
+    def switches_for_day(self, day: date) -> list[tuple]:
+        return self.switches_in_range(*day_bounds(day))
+
     def tracked_seconds(self, day: date) -> float:
-        start, end = day_bounds(day)
-        (total,) = self.conn.execute(
-            "SELECT COALESCE(SUM(duration_s), 0) FROM events"
-            " WHERE ts >= ? AND ts < ?",
-            (start, end),
-        ).fetchone()
-        return float(total)
+        return self.tracked_seconds_in_range(*day_bounds(day))
+
+    def top_apps(self, day: date, limit: int = 10) -> list[tuple]:
+        return self.top_apps_in_range(*day_bounds(day), limit)
 
     def close(self) -> None:
         self.conn.close()

@@ -9,9 +9,14 @@ can *see* where your focus fragmented.
 
 - Frontmost application (name, bundle id, PID) via `NSWorkspace`.
 - Front window title via the window server / Accessibility API.
-- Active browser **tab title** for known browsers via AppleScript.
+- Active browser **tab title and URL** for known browsers via AppleScript
+  (Safari, Chrome, Brave, Edge, Arc; Zen attempted), reduced to a **domain**
+  (github.com, youtube.com) so dwell time aggregates per site.
 - Context switches between frontmost processes, with a fragmentation rate
   (switches per minute/hour) over time.
+- **Transitions**: consecutive event pairs reveal where attention goes
+  next — each top app/site shows its top-3 immediate destinations
+  ("Where you go next").
 
 **Privacy:** no screenshots, no keylogging, no network calls, no content
 capture — local metadata only, stored in a SQLite database on your machine.
@@ -44,25 +49,33 @@ Rewind works with reduced data when permissions are missing — nothing breaks:
 - **Accessibility** (System Settings → Privacy & Security → Accessibility):
   lets Rewind read front window titles when the window server redacts them.
 - **Automation** (prompted on first use, per browser): lets AppleScript read
-  the active tab title of Safari/Chrome/Arc/etc. Deny it and Rewind still
-  records the browser's window title.
+  the active tab's title **and URL** (Safari/Chrome/Brave/Edge/Arc; Zen's
+  scripting bridge is limited and commonly declines — Rewind then records
+  just its window title). Deny it and Rewind still records the browser's
+  window title, without the domain.
 
 ## Where your data lives
 
 `~/Library/Application Support/Rewind/rewind.db` — SQLite in **WAL mode** so
 the background poller (a `QThread`) and the UI can share it safely.
 
-Schema: `events` (timestamp, app name, bundle id, window title, pid, duration)
-and `switches` (timestamp, from/to pid, from/to app).
+Schema (migrated via `PRAGMA user_version`): `events` (timestamp, app name,
+bundle id, window title, pid, duration, **domain**) and `switches`
+(timestamp, from/to pid, from/to app).
 
 ## Using it
 
-- **Rewind tab** — the seismograph: a heartbeat trace of your day. Each spike
-  is a context switch; taller, denser spikes = more fragmented attention.
-  Navigate days with the arrows, or hit **Replay day** to sweep a playhead
-  across the trace.
-- **Timeline tab** — every observation, chronologically.
-- **Stats tab** — top apps by dwell time and switches per hour.
+- **Rewind tab** — the seismograph: a heartbeat trace of your attention.
+  Each spike is a context switch; taller, denser spikes = more fragmented
+  attention. Pick a **timeframe** (Last 24 hours / 12 / 6 / Today), step
+  the window with `‹`/`›`, or hit **Replay** to sweep a playhead across
+  the trace.
+- **Timeline tab** — every observation, chronologically, including the
+  site behind each browser event.
+- **Stats tab** — recomputed for the same timeframes: top apps, **sites**,
+  exact **pages/documents** by dwell time, switches per hour, and a
+  **Where you go next** column listing each item's top-3 immediate
+  destinations with percentages.
 - The toolbar's **Pause tracking** stops the poller; Resume picks it back up.
 
 ## Project layout
@@ -74,13 +87,15 @@ rewind/
   tracker.py        # NSWorkspace / Quartz / AppleScript sampler (macOS)
   workers.py        # QThread poller -> EventStore + Qt signals
   switches.py       # context-switch counter + fragmentation math (pure)
-  db.py             # SQLite WAL schema + queries (pure)
+  transitions.py    # 'where you go next' consecutive-pair aggregation (pure)
+  db.py             # SQLite WAL schema, migrations + range queries (pure)
   theme.py          # design tokens (color/type/spacing) + central QSS
-  views/            # RewindView, TimelineView, StatsView
+  views/            # RewindView, TimelineView, StatsView, TimeframeSelector
   widgets/          # SeismographWidget (custom-painted EKG trace)
 tools/
-  capture_screenshots.py  # offscreen renders into docs/screenshots/
-docs/screenshots/   # rendered UI screenshots
+  capture_screenshots.py  # offscreen PNG renders into docs/screenshots/
+  capture_replay_gif.py   # offscreen animated GIF of the replay scrubber
+docs/screenshots/   # rendered UI screenshots + replay GIF
 tests/              # pytest suite for the pure modules
 ```
 
@@ -93,7 +108,8 @@ tracking), three tabs, and a status bar at the bottom.
   spike per context switch, replay playhead), and a hairline-divided metric
   strip: tracked hours, context switches, switches/hour, most-used app.
 - **Timeline** — the day's observations in a hairline-gridded table.
-- **Stats** — top apps by dwell time and switches per hour.
+- **Stats** — top apps, sites, pages/documents, switches per hour, and
+  "Where you go next" transitions, all scoped to the timeframe selector.
 
 The visual system lives in `rewind/theme.py`: one accent color (phosphor
 green, the trace itself), one radius scale, hairline borders and negative
@@ -102,12 +118,18 @@ the stylesheet is generated once by `theme.stylesheet()`.
 
 ![Rewind main window](docs/screenshots/main-window.png)
 ![Daily rewind seismograph view](docs/screenshots/rewind-timeline.png)
+![Stats breakdowns and transitions](docs/screenshots/stats-tab.png)
 ![Timeline tab](docs/screenshots/timeline-tab.png)
+
+Replay scrubber in action:
+
+![Replay playhead sweeping the seismograph](docs/screenshots/rewind-replay.gif)
 
 Regenerate the docs images against a seeded day (works headless):
 
 ```bash
 QT_QPA_PLATFORM=offscreen python tools/capture_screenshots.py
+QT_QPA_PLATFORM=offscreen python tools/capture_replay_gif.py
 ```
 
 ## Tests
