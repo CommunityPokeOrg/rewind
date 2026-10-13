@@ -153,6 +153,22 @@ QToolButton:checked {{
     color: {ACCENT};
 }}
 
+/* ------------------------- slider: hairline groove, accent handle */
+QSlider::groove:horizontal {{
+    height: 2px;
+    background: {BORDER};
+    border-radius: 1px;
+}}
+QSlider::sub-page:horizontal {{ background: {ACCENT}; }}
+QSlider::handle:horizontal {{
+    background: {ACCENT};
+    width: 10px;
+    height: 10px;
+    margin: -5px 0;
+    border-radius: 5px;
+}}
+QSlider::handle:horizontal:hover {{ background: {TEXT}; }}
+
 /* ------------------------- tables: hairline grid, no card chrome */
 QTableWidget {{
     background: {BG_RAISED};

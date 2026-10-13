@@ -3,7 +3,7 @@
 Pure Python — no Qt — so it is testable off-macOS. The poller calls
 ``observe`` on every sample; whenever the frontmost PID changes we count a
 context switch. Fragmentation is expressed as switches per minute over a
-sliding window, which the seismograph widget renders as an EKG trace.
+sliding window.
 """
 
 from __future__ import annotations

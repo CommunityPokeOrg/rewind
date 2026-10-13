@@ -1,3 +1,3 @@
-from .seismograph import SeismographWidget
+from .ripple import RippleWidget
 
-__all__ = ["SeismographWidget"]
+__all__ = ["RippleWidget"]

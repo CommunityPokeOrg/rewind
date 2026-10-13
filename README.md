@@ -2,7 +2,7 @@
 
 A **macOS, local-first time tracker** that watches your attention like a heart
 monitor. Rewind passively records which app and window is in front, counts your
-context switches, and replays the day as a seismograph/EKG-style trace so you
+context switches, and replays the day as a pond of expanding ripples so you
 can *see* where your focus fragmented.
 
 ## What it tracks (and what it never does)
@@ -65,11 +65,12 @@ bundle id, window title, pid, duration, **domain**) and `switches`
 
 ## Using it
 
-- **Rewind tab** — the seismograph: a heartbeat trace of your attention.
-  Each spike is a context switch; taller, denser spikes = more fragmented
-  attention. Pick a **timeframe** (Last 24 hours / 12 / 6 / Today), step
-  the window with `‹`/`›`, or hit **Replay** to sweep a playhead across
-  the trace.
+- **Rewind tab** — the pond: every context switch drops a ripple ring at
+  its moment on the timeline, labeled with the app or site. Long focus
+  sessions land as wide, slow rings; sub-30-second checks are droplets
+  that dissipate fast. Pick a **timeframe** (Last 24 hours / 12 / 6 /
+  Today), step the window with `‹`/`›`, hit **Replay** to sweep the
+  playhead, or drag the scrubber to seek.
 - **Timeline tab** — every observation, chronologically, including the
   site behind each browser event.
 - **Stats tab** — recomputed for the same timeframes: top apps, **sites**,
@@ -91,11 +92,11 @@ rewind/
   db.py             # SQLite WAL schema, migrations + range queries (pure)
   theme.py          # design tokens (color/type/spacing) + central QSS
   views/            # RewindView, TimelineView, StatsView, TimeframeSelector
-  widgets/          # SeismographWidget (custom-painted EKG trace)
+  widgets/          # RippleWidget (custom-painted pond-ripple canvas)
 tools/
   capture_screenshots.py  # offscreen PNG renders into docs/screenshots/
-  capture_replay_gif.py   # offscreen animated GIF of the replay scrubber
-docs/screenshots/   # rendered UI screenshots + replay GIF
+  capture_replay_mp4.py   # Xvfb + ffmpeg MP4 of the ripple replay
+docs/screenshots/   # rendered UI screenshots + replay MP4
 tests/              # pytest suite for the pure modules
 ```
 
@@ -104,9 +105,10 @@ tests/              # pytest suite for the pure modules
 A single dark, slate-charcoal window: a slim toolbar strip on top (Pause
 tracking), three tabs, and a status bar at the bottom.
 
-- **Rewind** — day navigation, the seismograph trace (hour grid, one EKG
-  spike per context switch, replay playhead), and a hairline-divided metric
-  strip: tracked hours, context switches, switches/hour, most-used app.
+- **Rewind** — day navigation, the ripple canvas (hour grid, one
+  expanding ring per active block, replay playhead + scrubber), and a
+  hairline-divided metric strip: tracked hours, context switches,
+  switches/hour, most-used app.
 - **Timeline** — the day's observations in a hairline-gridded table.
 - **Stats** — top apps, sites, pages/documents, switches per hour, and
   "Where you go next" transitions, all scoped to the timeframe selector.
@@ -117,19 +119,19 @@ space instead of card chrome, and a system type stack. Views consume tokens;
 the stylesheet is generated once by `theme.stylesheet()`.
 
 ![Rewind main window](docs/screenshots/main-window.png)
-![Daily rewind seismograph view](docs/screenshots/rewind-timeline.png)
+![Daily rewind ripple view](docs/screenshots/rewind-timeline.png)
 ![Stats breakdowns and transitions](docs/screenshots/stats-tab.png)
 ![Timeline tab](docs/screenshots/timeline-tab.png)
 
 Replay scrubber in action:
 
-![Replay playhead sweeping the seismograph](docs/screenshots/rewind-replay.gif)
+[Replay playhead rippling across the pond](docs/screenshots/rewind-ripple-replay.mp4)
 
 Regenerate the docs images against a seeded day (works headless):
 
 ```bash
 QT_QPA_PLATFORM=offscreen python tools/capture_screenshots.py
-QT_QPA_PLATFORM=offscreen python tools/capture_replay_gif.py
+xvfb-run -a python tools/capture_replay_mp4.py   # needs ffmpeg
 ```
 
 ## Tests
@@ -139,7 +141,8 @@ pip install pytest
 pytest
 ```
 
-(The suite covers the storage and fragmentation logic, which are Qt-free.)
+(The suite covers the storage, fragmentation and transition logic, plus
+an offscreen smoke test for the ripple widget.)
 
 ## License
 

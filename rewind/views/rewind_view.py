@@ -1,29 +1,31 @@
-"""Daily rewind view — the EKG replay of an attention window.
+"""Daily rewind view — the pond-ripple replay of an attention window.
 
 Layout: a quiet nav strip (‹ › window stepping + timeframe selector),
-the hero seismograph, then a divided metric strip. All visual decisions
-come from rewind.theme tokens.
+the hero ripple canvas, a hairline scrubber, then a divided metric
+strip. All visual decisions come from rewind.theme tokens.
 """
 
 from __future__ import annotations
 
 from datetime import datetime
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import Qt, QTimer
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
 
 from .. import theme
 from ..db import EventStore, day_bounds
-from ..switches import fragmentation_series
-from ..widgets import SeismographWidget
+from ..widgets import RippleWidget
 from .timeframe import TimeframeSelector
+
+SCRUB_STEPS = 1000
 
 
 def _metric(value: str, label: str) -> QWidget:
@@ -48,6 +50,7 @@ class RewindView(QWidget):
         self.start, self.end = 0.0, 1.0
         self._offset = 0.0  # ‹ › stepping, applied to the anchored window
         self._replay_ts: float | None = None
+        self._scrubbing = False
 
         self.date_label = QLabel()
         self.date_label.setObjectName("dateLabel")
@@ -69,7 +72,13 @@ class RewindView(QWidget):
         nav.addStretch(1)
         nav.addWidget(self.replay_btn)
 
-        self.seismograph = SeismographWidget()
+        self.ripple = RippleWidget()
+
+        self.scrubber = QSlider(Qt.Horizontal)
+        self.scrubber.setRange(0, SCRUB_STEPS)
+        self.scrubber.setValue(0)
+        self.scrubber.setSingleStep(1)
+        self.scrubber.setToolTip("Scrub the replay")
 
         self.m_tracked = _metric("0.0 h", "Tracked")
         self.m_switches = _metric("0", "Context switches")
@@ -91,7 +100,8 @@ class RewindView(QWidget):
         )
         root.setSpacing(theme.SPACE_MD)
         root.addLayout(nav)
-        root.addWidget(self.seismograph, stretch=1)
+        root.addWidget(self.ripple, stretch=1)
+        root.addWidget(self.scrubber)
         root.addLayout(metrics)
 
         self._timer = QTimer(self)
@@ -102,6 +112,9 @@ class RewindView(QWidget):
         self.next_btn.clicked.connect(lambda: self._shift_window(+1))
         self.timeframe.rangeChanged.connect(self._set_range)
         self.replay_btn.clicked.connect(self._toggle_replay)
+        self.scrubber.sliderPressed.connect(self._scrub_start)
+        self.scrubber.sliderReleased.connect(self._scrub_end)
+        self.scrubber.sliderMoved.connect(self._scrub_to)
 
         self.refresh()
 
@@ -124,10 +137,14 @@ class RewindView(QWidget):
         self.date_label.setText(self._range_label(start, end))
 
         switches = self.store.switches_in_range(start, end)
-        spike_times = [s[0] for s in switches]
-        bucket_s = max(60.0, (end - start) / 240)
-        series = fragmentation_series(spike_times, start, end, bucket_s=bucket_s)
-        self.seismograph.set_data(series, spike_times, start, end)
+
+        blocks = [
+            (ts, max(dwell, 0.0), domain or app)
+            for ts, app, _bid, _title, _pid, dwell, domain in
+            self.store.events_in_range(start, end)
+        ]
+        self.ripple.set_data(blocks, start, end)
+        self.scrubber.setValue(0)
 
         tracked = self.store.tracked_seconds_in_range(start, end)
         n = len(switches)
@@ -158,7 +175,9 @@ class RewindView(QWidget):
         if self._timer.isActive():
             self._stop_replay()
         else:
-            self._replay_ts = self.start
+            # resume from a scrubbed position when there is one
+            if self._replay_ts is None:
+                self._replay_ts = self.start
             self.replay_btn.setText("Stop")
             self._timer.start()
 
@@ -166,7 +185,8 @@ class RewindView(QWidget):
         self._timer.stop()
         self._replay_ts = None
         self.replay_btn.setText("Replay")
-        self.seismograph.set_playhead(None)
+        self.ripple.set_playhead(None)
+        self.scrubber.setValue(0)
 
     def _tick_replay(self) -> None:
         span = self.end - self.start
@@ -175,4 +195,24 @@ class RewindView(QWidget):
         if self._replay_ts >= self.end:
             self._stop_replay()
             return
-        self.seismograph.set_playhead(self._replay_ts)
+        self.ripple.set_playhead(self._replay_ts)
+        if not self._scrubbing:
+            frac = (self._replay_ts - self.start) / span
+            self.scrubber.setValue(round(frac * SCRUB_STEPS))
+
+    # ------------------------------------------------------------------ scrub
+
+    def _scrub_start(self) -> None:
+        self._scrubbing = True
+
+    def _scrub_end(self) -> None:
+        self._scrub_to(self.scrubber.value())
+        self._scrubbing = False
+
+    def _scrub_to(self, value: int) -> None:
+        span = self.end - self.start
+        ts = self.start + span * value / SCRUB_STEPS
+        # remember the position — a running replay resumes from it, and
+        # pressing Replay after a dry scrub starts there too
+        self._replay_ts = ts
+        self.ripple.set_playhead(ts)
