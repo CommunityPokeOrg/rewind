@@ -7,6 +7,7 @@ import sys
 from PySide6.QtWidgets import QApplication
 
 from .db import EventStore
+from .theme import apply_theme
 from .ui import RewindWindow
 
 
@@ -14,6 +15,7 @@ def main() -> int:
     app = QApplication(sys.argv)
     app.setApplicationName("Rewind")
     app.setOrganizationName("CommunityPokeOrg")
+    apply_theme(app)
     store = EventStore()
     win = RewindWindow(store)
     win.show()
