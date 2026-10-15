@@ -5,6 +5,8 @@ from __future__ import annotations
 from datetime import date, datetime
 
 from PySide6.QtWidgets import (
+    QFrame,
+    QHBoxLayout,
     QHeaderView,
     QLabel,
     QTableWidget,
@@ -22,6 +24,23 @@ class StatsView(QWidget):
         self.store = store
         self.day = date.today()
 
+        title = QLabel("Statistics")
+        title.setObjectName("pageTitle")
+        self.subtitle = QLabel()
+        self.subtitle.setObjectName("pageSubtitle")
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        title_col.addWidget(title)
+        title_col.addWidget(self.subtitle)
+
+        header = QHBoxLayout()
+        header.addLayout(title_col)
+        header.addStretch(1)
+
+        rule = QFrame()
+        rule.setObjectName("hairlineH")
+        rule.setFrameShape(QFrame.HLine)
+
         self.apps_label = QLabel("Top applications")
         self.apps_label.setObjectName("sectionLabel")
         self.apps_table = QTableWidget(0, 3)
@@ -29,6 +48,7 @@ class StatsView(QWidget):
         self.apps_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.apps_table.verticalHeader().setVisible(False)
         self.apps_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.apps_table.setShowGrid(False)
 
         self.hours_label = QLabel("Context switches per hour")
         self.hours_label.setObjectName("sectionLabel")
@@ -37,10 +57,17 @@ class StatsView(QWidget):
         self.hours_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
         self.hours_table.verticalHeader().setVisible(False)
         self.hours_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.hours_table.setShowGrid(False)
 
         root = QVBoxLayout(self)
+        root.setContentsMargins(26, 20, 26, 16)
+        root.setSpacing(8)
+        root.addLayout(header)
+        root.addWidget(rule)
+        root.addSpacing(4)
         root.addWidget(self.apps_label)
         root.addWidget(self.apps_table, stretch=1)
+        root.addSpacing(8)
         root.addWidget(self.hours_label)
         root.addWidget(self.hours_table, stretch=1)
 
@@ -48,6 +75,7 @@ class StatsView(QWidget):
 
     def show_day(self, day: date) -> None:
         self.day = day
+        self.subtitle.setText(day.strftime("%A, %B %-d, %Y"))
 
         apps = self.store.top_apps(day, limit=15)
         self.apps_table.setRowCount(len(apps))

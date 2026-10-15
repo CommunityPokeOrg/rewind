@@ -4,8 +4,9 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
-from PySide6.QtCore import QDate, QTimer, Qt
+from PySide6.QtCore import QTimer
 from PySide6.QtWidgets import (
+    QFrame,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -29,28 +30,51 @@ class RewindView(QWidget):
         self.day = date.today()
         self._replay_ts: float | None = None
 
+        title = QLabel("Rewind")
+        title.setObjectName("pageTitle")
         self.date_label = QLabel()
-        self.prev_btn = QPushButton("‹ Previous day")
-        self.next_btn = QPushButton("Next day ›")
+        self.date_label.setObjectName("pageSubtitle")
+        title_col = QVBoxLayout()
+        title_col.setSpacing(2)
+        title_col.addWidget(title)
+        title_col.addWidget(self.date_label)
+
+        self.prev_btn = QPushButton("‹")
+        self.prev_btn.setObjectName("navButton")
+        self.prev_btn.setFixedSize(28, 28)
+        self.prev_btn.setToolTip("Previous day")
+        self.next_btn = QPushButton("›")
+        self.next_btn.setObjectName("navButton")
+        self.next_btn.setFixedSize(28, 28)
+        self.next_btn.setToolTip("Next day")
         self.today_btn = QPushButton("Today")
         self.replay_btn = QPushButton("Replay day")
+        self.replay_btn.setProperty("accent", True)
 
-        nav = QHBoxLayout()
-        nav.addWidget(self.prev_btn)
-        nav.addWidget(self.next_btn)
-        nav.addWidget(self.today_btn)
-        nav.addStretch(1)
-        nav.addWidget(self.date_label)
-        nav.addStretch(1)
-        nav.addWidget(self.replay_btn)
+        header = QHBoxLayout()
+        header.setSpacing(8)
+        header.addLayout(title_col)
+        header.addStretch(1)
+        header.addWidget(self.prev_btn)
+        header.addWidget(self.next_btn)
+        header.addWidget(self.today_btn)
+        header.addWidget(self.replay_btn)
+
+        rule = QFrame()
+        rule.setObjectName("hairlineH")
+        rule.setFrameShape(QFrame.HLine)
 
         self.seismograph = SeismographWidget()
+        self.seismograph.setObjectName("chartPanel")
 
         self.summary_label = QLabel()
         self.summary_label.setObjectName("summaryLabel")
 
         root = QVBoxLayout(self)
-        root.addLayout(nav)
+        root.setContentsMargins(26, 20, 26, 16)
+        root.setSpacing(12)
+        root.addLayout(header)
+        root.addWidget(rule)
         root.addWidget(self.seismograph, stretch=1)
         root.addWidget(self.summary_label)
 
