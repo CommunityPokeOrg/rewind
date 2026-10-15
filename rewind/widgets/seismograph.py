@@ -3,7 +3,9 @@
 Renders the day's context switches as a cardiac-monitor strip: a calm
 baseline that spikes sharply at each frontmost-app switch, with amplitude
 shaped by the bucketed switches-per-minute series. A playhead sweeps the
-trace during replay. Flat colors and 1px hairlines only — no gradients.
+trace during replay. As the replay playhead sweeps past each switch, the
+spike emits an expanding hairline ripple — the "ripple effect" that marks
+where attention broke. Flat colors and 1px hairlines only — no gradients.
 """
 
 from __future__ import annotations
@@ -12,7 +14,7 @@ import math
 from datetime import datetime
 from typing import Optional, Sequence
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
@@ -25,6 +27,10 @@ from ..theme import (
 )
 
 
+RIPPLE_LIFE_MS = 2600      # how long one ripple expands/fades
+RIPPLE_TICK_MS = 33        # animation cadence while ripples are alive
+
+
 class SeismographWidget(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -34,6 +40,13 @@ class SeismographWidget(QWidget):
         self._start = 0.0
         self._end = 1.0
         self._playhead: Optional[float] = None
+
+        self._clock = QElapsedTimer()
+        self._clock.start()
+        self._ripples: list[tuple[float, float]] = []  # (spike_ts, born_ms)
+        self._ripple_timer = QTimer(self)
+        self._ripple_timer.setInterval(RIPPLE_TICK_MS)
+        self._ripple_timer.timeout.connect(self._age_ripples)
 
     # ------------------------------------------------------------------ data
 
@@ -50,7 +63,29 @@ class SeismographWidget(QWidget):
         self.update()
 
     def set_playhead(self, ts: Optional[float]) -> None:
+        if ts is None:
+            self._ripples.clear()
+            self._ripple_timer.stop()
+        else:
+            prev = self._playhead
+            if prev is not None and ts > prev:
+                now = self._clock.elapsed()
+                for s in self._spikes:
+                    if prev < s <= ts:
+                        self._ripples.append((s, now))
+            if not self._ripple_timer.isActive():
+                self._ripple_timer.start()
         self._playhead = ts
+        self.update()
+
+    def _age_ripples(self) -> None:
+        now = self._clock.elapsed()
+        self._ripples = [
+            (ts, born) for ts, born in self._ripples
+            if now - born < RIPPLE_LIFE_MS
+        ]
+        if not self._ripples and self._playhead is None:
+            self._ripple_timer.stop()
         self.update()
 
     # ------------------------------------------------------------------ paint
@@ -133,9 +168,39 @@ class SeismographWidget(QWidget):
         path.lineTo(QPointF(x0 + w, base))
         p.drawPath(path)
 
-        # playhead
+        # ripples: flat hairline ellipses expanding from each switch the
+        # playhead has crossed — alpha fades as the ring grows (no gradients,
+        # just a single stroked ring per ripple).
+        if self._ripples:
+            now = self._clock.elapsed()
+            p.setBrush(Qt.NoBrush)
+            for ts, born in self._ripples:
+                age = (now - born) / RIPPLE_LIFE_MS
+                if age < 0 or age > 1:
+                    continue
+                center = QPointF(x0 + self._x(ts, w), base)
+                rx = 6.0 + age * 44.0
+                color = QColor(PLAYHEAD)
+                color.setAlpha(int(190 * (1 - age)))
+                p.setPen(QPen(color, 1.2))
+                p.drawEllipse(center, rx, rx * 0.34)
+                color.setAlpha(int(90 * (1 - age)))
+                p.setPen(QPen(color, 1.0))
+                p.drawEllipse(center, rx * 0.6, rx * 0.2)
+
+        # playhead + its continuous ripple pulse (sonar ping at the sweep
+        # point, two rings offset half a cycle so one is always expanding)
         if self._playhead is not None and self._start <= self._playhead <= self._end:
             x = x0 + self._x(self._playhead, w)
+            now = self._clock.elapsed()
+            p.setBrush(Qt.NoBrush)
+            for offset in (0.0, 0.5):
+                phase = ((now + offset * 700.0) % 700.0) / 700.0
+                rr = 5.0 + phase * 30.0
+                color = QColor(PLAYHEAD)
+                color.setAlpha(int(150 * (1 - phase)))
+                p.setPen(QPen(color, 1.0))
+                p.drawEllipse(QPointF(x, base), rr, rr * 0.34)
             p.setPen(QPen(QColor(PLAYHEAD), 1.5))
             p.drawLine(QPointF(x, y0 + 2), QPointF(x, y0 + plot_h - 2))
             p.setBrush(QColor(PLAYHEAD))

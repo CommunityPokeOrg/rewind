@@ -57,13 +57,13 @@ and `switches` (timestamp, from/to pid, from/to app).
 
 ## Using it
 
-- **Rewind tab** — the seismograph: a heartbeat trace of your day. Each spike
+- **Rewind** — the seismograph: a heartbeat trace of your day. Each spike
   is a context switch; taller, denser spikes = more fragmented attention.
   Navigate days with the arrows, or hit **Replay day** to sweep a playhead
-  across the trace.
-- **Timeline tab** — every observation, chronologically.
-- **Stats tab** — top apps by dwell time and switches per hour.
-- The toolbar's **Pause tracking** stops the poller; Resume picks it back up.
+  across the trace — each switch it crosses emits an expanding ripple.
+- **Timeline** — every observation, chronologically.
+- **Statistics** — top apps by dwell time and switches per hour.
+- The sidebar's **Pause tracking** stops the poller; Resume picks it back up.
 
 ## Project layout
 
