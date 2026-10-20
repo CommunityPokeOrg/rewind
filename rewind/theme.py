@@ -34,7 +34,7 @@ ACCENT = "#0a84ff"          # macOS systemBlue (dark)
 ACCENT_HOVER = "#1f8fff"
 ACCENT_PRESSED = "#0077ee"
 TRACE = "#30d158"           # macOS systemGreen (dark) — EKG trace
-PLAYHEAD = "#ff453a"        # macOS systemRed (dark) — replay playhead
+RIPPLE = "#ff453a"          # macOS systemRed (dark) — replay ripples
 
 # --- chart painting -------------------------------------------------------------
 GRID_LINE = QColor(255, 255, 255, 12)
