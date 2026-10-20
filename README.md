@@ -59,8 +59,9 @@ and `switches` (timestamp, from/to pid, from/to app).
 
 - **Rewind** — the seismograph: a heartbeat trace of your day. Each spike
   is a context switch; taller, denser spikes = more fragmented attention.
-  Navigate days with the arrows, or hit **Replay day** to sweep a playhead
-  across the trace — each switch it crosses emits an expanding ripple.
+  Navigate days with the arrows, or hit **Replay day**: a monospaced clock
+  steps through the day while each switch it passes emits a radial ripple
+  naming the app attention moved to.
 - **Timeline** — every observation, chronologically.
 - **Statistics** — top apps by dwell time and switches per hour.
 - The sidebar's **Pause tracking** stops the poller; Resume picks it back up.

@@ -106,7 +106,8 @@ class RewindView(QWidget):
         start, end = day_bounds(day)
         spike_times = [s[0] for s in switches]
         series = fragmentation_series(spike_times, start, end, bucket_s=300)
-        self.seismograph.set_data(series, spike_times, start, end)
+        spikes = [(s[0], s[4]) for s in switches]  # (ts, to_app)
+        self.seismograph.set_data(series, spikes, start, end)
 
         tracked = self.store.tracked_seconds(day)
         n = len(switches)
@@ -133,7 +134,7 @@ class RewindView(QWidget):
         self._timer.stop()
         self._replay_ts = None
         self.replay_btn.setText("Replay day")
-        self.seismograph.set_playhead(None)
+        self.seismograph.set_replay_position(None)
 
     def _tick_replay(self) -> None:
         start, end = day_bounds(self.day)
@@ -142,4 +143,4 @@ class RewindView(QWidget):
         if self._replay_ts >= end:
             self._stop_replay()
             return
-        self.seismograph.set_playhead(self._replay_ts)
+        self.seismograph.set_replay_position(self._replay_ts)

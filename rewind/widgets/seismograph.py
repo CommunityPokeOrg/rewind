@@ -2,10 +2,13 @@
 
 Renders the day's context switches as a cardiac-monitor strip: a calm
 baseline that spikes sharply at each frontmost-app switch, with amplitude
-shaped by the bucketed switches-per-minute series. A playhead sweeps the
-trace during replay. As the replay playhead sweeps past each switch, the
-spike emits an expanding hairline ripple — the "ripple effect" that marks
-where attention broke. Flat colors and 1px hairlines only — no gradients.
+shaped by the bucketed switches-per-minute series. Replay has no scrubber:
+a minimal monospaced HH:MM watch readout steps rapidly through the day's
+clock, and every switch the replay passes emits a radial ripple from the
+center of the panel — the destination app's name rides inside it like a
+bubble, scaling up on an ease-out curve, holding full opacity, then fading
+as the ring expands and dissipates.
+Flat colors and 1px hairlines only — no gradients.
 """
 
 from __future__ import annotations
@@ -15,13 +18,14 @@ from datetime import datetime
 from typing import Optional, Sequence
 
 from PySide6.QtCore import QElapsedTimer, QPointF, QRectF, Qt, QTimer
-from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen
+from PySide6.QtGui import QColor, QFontDatabase, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QWidget
 
 from ..theme import (
     BASE_LINE,
     GRID_LINE,
-    PLAYHEAD,
+    RIPPLE,
+    TEXT_PRIMARY,
     TEXT_TERTIARY,
     TRACE,
 )
@@ -29,6 +33,12 @@ from ..theme import (
 
 RIPPLE_LIFE_MS = 2600      # how long one ripple expands/fades
 RIPPLE_TICK_MS = 33        # animation cadence while ripples are alive
+LABEL_SCALE_IN = 0.40      # fraction of ripple life the label pops in over
+MAX_RIPPLES = 12           # cap concurrent ripples so dense runs stay readable
+
+
+def _ease_out_cubic(t: float) -> float:
+    return 1.0 - (1.0 - t) ** 3
 
 
 class SeismographWidget(QWidget):
@@ -36,14 +46,14 @@ class SeismographWidget(QWidget):
         super().__init__(parent)
         self.setMinimumHeight(180)
         self._series: list[tuple[float, float]] = []  # (bucket_ts, switches/min)
-        self._spikes: list[float] = []                # exact switch timestamps
+        self._spikes: list[tuple[float, str]] = []    # (switch_ts, to_app)
         self._start = 0.0
         self._end = 1.0
-        self._playhead: Optional[float] = None
+        self._clock_ts: Optional[float] = None        # replay clock position
 
         self._clock = QElapsedTimer()
         self._clock.start()
-        self._ripples: list[tuple[float, float]] = []  # (spike_ts, born_ms)
+        self._ripples: list[tuple[float, str]] = []  # (born_ms, app_name)
         self._ripple_timer = QTimer(self)
         self._ripple_timer.setInterval(RIPPLE_TICK_MS)
         self._ripple_timer.timeout.connect(self._age_ripples)
@@ -53,38 +63,40 @@ class SeismographWidget(QWidget):
     def set_data(
         self,
         series: Sequence[tuple[float, float]],
-        spikes: Sequence[float],
+        spikes: Sequence[tuple[float, Optional[str]]],
         start: float,
         end: float,
     ) -> None:
         self._series = list(series)
-        self._spikes = sorted(spikes)
+        self._spikes = sorted((ts, name or "") for ts, name in spikes)
         self._start, self._end = start, max(end, start + 1)
         self.update()
 
-    def set_playhead(self, ts: Optional[float]) -> None:
+    def set_replay_position(self, ts: Optional[float]) -> None:
+        """Move the replay clock; each switch crossed spawns a ripple."""
         if ts is None:
             self._ripples.clear()
             self._ripple_timer.stop()
         else:
-            prev = self._playhead
+            prev = self._clock_ts
             if prev is not None and ts > prev:
                 now = self._clock.elapsed()
-                for s in self._spikes:
+                for s, name in self._spikes:
                     if prev < s <= ts:
-                        self._ripples.append((s, now))
+                        self._ripples.append((now, name))
+                del self._ripples[:-MAX_RIPPLES]
             if not self._ripple_timer.isActive():
                 self._ripple_timer.start()
-        self._playhead = ts
+        self._clock_ts = ts
         self.update()
 
     def _age_ripples(self) -> None:
         now = self._clock.elapsed()
         self._ripples = [
-            (ts, born) for ts, born in self._ripples
+            (born, name) for born, name in self._ripples
             if now - born < RIPPLE_LIFE_MS
         ]
-        if not self._ripples and self._playhead is None:
+        if not self._ripples and self._clock_ts is None:
             self._ripple_timer.stop()
         self.update()
 
@@ -146,7 +158,7 @@ class SeismographWidget(QWidget):
         p.setPen(QPen(QColor(TRACE), 1.8))
         path = QPainterPath(QPointF(x0, base))
         i = 0
-        spikes = self._spikes
+        spikes = [ts for ts, _ in self._spikes]
         for ts, rate in self._series:
             x = x0 + self._x(ts, w)
             while i < len(spikes) and spikes[i] < ts:
@@ -168,42 +180,68 @@ class SeismographWidget(QWidget):
         path.lineTo(QPointF(x0 + w, base))
         p.drawPath(path)
 
-        # ripples: flat hairline ellipses expanding from each switch the
-        # playhead has crossed — alpha fades as the ring grows (no gradients,
-        # just a single stroked ring per ripple).
+        # ripples: flat hairline rings expanding radially from the panel's
+        # center — one per switch the replay has crossed. Each carries the
+        # destination app's name as a bubble label that pops in on an
+        # ease-out curve, holds full opacity, then fades as the ring
+        # expands and dissipates (no gradients, just stroked rings).
+        center = QPointF(x0 + w / 2.0, y0 + plot_h / 2.0)
         if self._ripples:
             now = self._clock.elapsed()
+            max_r = math.hypot(w, plot_h) * 0.38
             p.setBrush(Qt.NoBrush)
-            for ts, born in self._ripples:
+            n_live = len(self._ripples)
+            for idx, (born, name) in enumerate(self._ripples):
                 age = (now - born) / RIPPLE_LIFE_MS
                 if age < 0 or age > 1:
                     continue
-                center = QPointF(x0 + self._x(ts, w), base)
-                rx = 6.0 + age * 44.0
-                color = QColor(PLAYHEAD)
-                color.setAlpha(int(190 * (1 - age)))
+                r = 8.0 + _ease_out_cubic(age) * max_r
+                color = QColor(RIPPLE)
+                color.setAlpha(int(180 * (1 - age)))
                 p.setPen(QPen(color, 1.2))
-                p.drawEllipse(center, rx, rx * 0.34)
-                color.setAlpha(int(90 * (1 - age)))
+                p.drawEllipse(center, r, r)
+                color.setAlpha(int(85 * (1 - age)))
                 p.setPen(QPen(color, 1.0))
-                p.drawEllipse(center, rx * 0.6, rx * 0.2)
+                p.drawEllipse(center, r * 0.62, r * 0.62)
+                if name:
+                    scale = 0.5 + 0.5 * _ease_out_cubic(
+                        min(age / LABEL_SCALE_IN, 1.0)
+                    )
+                    alpha = int(
+                        255 * min(age / 0.15, 1.0)
+                        * min((1.0 - age) / 0.45, 1.0)
+                    )
+                    label_font = p.font()
+                    label_font.setPointSizeF(12.0)
+                    label_font.setBold(True)
+                    # fan concurrent labels apart so each stays readable
+                    dy = (idx - (n_live - 1) / 2.0) * 26.0
+                    p.setFont(label_font)
+                    p.save()
+                    p.translate(center.x(), center.y() + dy)
+                    p.scale(scale, scale)
+                    color = QColor(TEXT_PRIMARY)
+                    color.setAlpha(alpha)
+                    p.setPen(color)
+                    p.drawText(
+                        QRectF(-w / 2.0, -12, w, 24),
+                        Qt.AlignCenter,
+                        name,
+                    )
+                    p.restore()
 
-        # playhead + its continuous ripple pulse (sonar ping at the sweep
-        # point, two rings offset half a cycle so one is always expanding)
-        if self._playhead is not None and self._start <= self._playhead <= self._end:
-            x = x0 + self._x(self._playhead, w)
-            now = self._clock.elapsed()
-            p.setBrush(Qt.NoBrush)
-            for offset in (0.0, 0.5):
-                phase = ((now + offset * 700.0) % 700.0) / 700.0
-                rr = 5.0 + phase * 30.0
-                color = QColor(PLAYHEAD)
-                color.setAlpha(int(150 * (1 - phase)))
-                p.setPen(QPen(color, 1.0))
-                p.drawEllipse(QPointF(x, base), rr, rr * 0.34)
-            p.setPen(QPen(QColor(PLAYHEAD), 1.5))
-            p.drawLine(QPointF(x, y0 + 2), QPointF(x, y0 + plot_h - 2))
-            p.setBrush(QColor(PLAYHEAD))
-            p.setPen(Qt.NoPen)
-            p.drawEllipse(QPointF(x, y0 + 4), 3, 3)
+        # digital watch readout: while replaying, a monospaced HH:MM steps
+        # through the day's clock — replaces the old linear scrubber head.
+        if self._clock_ts is not None:
+            clock_font = QFontDatabase.systemFont(QFontDatabase.FixedFont)
+            clock_font.setPointSizeF(15.0)
+            p.setFont(clock_font)
+            color = QColor(TEXT_PRIMARY)
+            color.setAlpha(220)
+            p.setPen(color)
+            p.drawText(
+                QRectF(x0, y0 + 4, w, 22),
+                Qt.AlignHCenter | Qt.AlignTop,
+                datetime.fromtimestamp(self._clock_ts).strftime("%H:%M"),
+            )
         p.end()
